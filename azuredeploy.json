@@ -1,0 +1,379 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+      "adminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Admin password on all VMs."
+      }
+    },
+     "adminUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "Admin username on all VMs."
+      }
+    },
+      "instanceCount": {
+        "type": "int",
+        "metadata": {
+          "description": "Number of VM instances (100 or less)."
+        },
+        "maxValue": 100
+      },
+      "resourceLocation": {
+        "type": "string",
+        "allowedValues": [
+          "North Europe",
+          "West Europe"
+        ],
+        "metadata": {
+          "description": "Azure region where all resources will be deployed. This is distinct from resource group location."
+        }
+      },
+      "subnetName": {
+        "type": "string",
+        "metadata": {
+          "description": "Name of the subnet inside the VNET"
+        }
+      },
+      "virtualNetworkName": {
+        "type": "string",
+        "metadata": {
+          "description": "VNET Name"
+        }
+      },
+      "virtualNetworkResourceGroup": {
+        "type": "string",
+        "metadata": {
+          "description": "Resource Group VNET is deployed in"
+        }
+      },
+      "vmSku": {
+        "type": "string",
+        "defaultValue": "Standard_F1",
+        "metadata": {
+          "description": "Size of VMs in the VM Scale Set."
+        }
+      },
+      "vmssName": {
+        "type": "string",
+        "metadata": {
+          "description": "String used as a base for naming resources (9 characters or less). A hash is prepended to this string for some resources, and resource-specific information is appended."
+        },
+        "maxLength": 15
+      },
+      "ubuntuOSVersion": {
+            "type": "string",
+            "defaultValue": "14.04.3-LTS",
+            "metadata": {
+                "description": "The Ubuntu version"
+            },
+            "allowedValues": [
+                "14.04.3-LTS",
+                "12.04.5-LTS"
+            ]
+        },
+        "mode": {
+            "type": "string",
+            "defaultValue": "Push",
+            "metadata": {
+                "description": "The functional mode, push MOF configuration (Push), distribute MOF configuration (Pull), install custom DSC module (Install)"
+            },
+            "allowedValues": [
+                "Push",
+                "Pull",
+                "Install",
+                "Register"
+            ]
+        },
+        "storageAccountName": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "The name of the storage account that contains the MOF file/meta MOF file/resource ZIP file"
+            }
+        },
+        "storageAccountKey": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "The key of the storage account that contains the MOF file/meta MOF file/resource ZIP file"
+            }
+        },
+        "fileUri": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "The uri of the MOF file/Meta MOF file/resource ZIP file"
+            }
+        },
+        "registrationUrl": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "The URL of the Azure Automation account"
+            }
+        },
+        "registrationKey": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "The access key of the Azure Automation account"
+            }
+        }
+    },
+    "variables": {
+      "apiVersion": "2015-06-15",
+      "bePoolName": "[concat(variables('namingInfix'), 'bepool')]",
+      "frontEndIPConfigID": "[concat(variables('lbID'),'/frontendIPConfigurations/loadBalancerFrontEnd')]",
+      "imageReference": "[variables('osType')]",
+      "ipConfigName": "[concat(variables('namingInfix'), 'ipconfig')]",
+      "lbID": "[resourceId('Microsoft.Network/loadBalancers',variables('loadBalancerName'))]",
+      "lbPoolID": "[concat(variables('lbID'),'/backendAddressPools/', variables('bePoolName'))]",
+      "lbProbeID": "[concat(variables('lbID'),'/probes/tcpProbe')]",
+      "lbHTTPSProbeID": "[concat(variables('lbID'),'/probes/tcpProbe')]",
+      "loadBalancerName": "[concat(variables('namingInfix'), 'lb')]",
+      "namingInfix": "[toLower(parameters('vmssName'))]",
+      "natBackendPortSSH": 22,
+      "natEndPortSSH": 50099,
+      "natPoolNameSSH": "[concat(variables('namingInfix'), 'natpoolSSH')]",
+      "natStartPortSSH": 50000,
+      "newStorageAccountName": "[concat(replace(variables('namingInfix'),'-',''), 'sa')]",
+      "nicName": "[concat(variables('namingInfix'), 'nic')]",
+      "osDiskName": "[concat(variables('namingInfix'), 'osdisk')]",
+      "osType": {
+      "publisher": "Canonical",
+      "offer": "UbuntuServer",
+      "sku": "[parameters('ubuntuOSVersion')]",
+      "version": "latest"
+      },
+      "publicIPAddressID": "[resourceId('Microsoft.Network/publicIPAddresses',variables('publicIPAddressName'))]",
+      "publicIPAddressName": "[concat(variables('namingInfix'), 'pip')]",
+      "saCount": 2,
+      "storageAccountType": "Standard_LRS",
+      "subnetName": "[concat(variables('namingInfix'), 'subnet')]",
+      "vhdContainerName": "[concat(variables('namingInfix'), 'vhd')]",
+      "virtualNetworkName": "[toLower(parameters('virtualNetworkName'))]"
+    },
+    "resources": [
+      {
+        "type": "Microsoft.Storage/storageAccounts",
+        "name": "[concat(variables('newStorageAccountName'), copyIndex())]",
+        "location": "[parameters('resourceLocation')]",
+        "apiVersion": "[variables('apiVersion')]",
+        "copy": {
+          "name": "storageLoop",
+          "count": "[variables('saCount')]"
+        },
+        "properties": {
+          "accountType": "[variables('storageAccountType')]"
+        }
+      },
+      {
+        "type": "Microsoft.Network/publicIPAddresses",
+        "name": "[variables('publicIPAddressName')]",
+        "location": "[parameters('resourceLocation')]",
+        "apiVersion": "[variables('apiVersion')]",
+        "properties": {
+          "publicIPAllocationMethod": "Dynamic",
+          "dnsSettings": {
+            "domainNameLabel": "[variables('namingInfix')]"
+          }
+        }
+      },
+      {
+        "type": "Microsoft.Network/loadBalancers",
+        "name": "[variables('loadBalancerName')]",
+        "location": "[parameters('resourceLocation')]",
+        "apiVersion": "[variables('apiVersion')]",
+        "dependsOn": [
+          "[concat('Microsoft.Network/publicIPAddresses/', variables('publicIPAddressName'))]"
+        ],
+        "properties": {
+          "frontendIPConfigurations": [
+            {
+              "name": "LoadBalancerFrontEnd",
+              "properties": {
+                "publicIPAddress": {
+                  "id": "[variables('publicIPAddressID')]"
+                }
+              }
+            }
+          ],
+          "backendAddressPools": [
+            {
+              "name": "[variables('bePoolName')]"
+            }
+          ],
+          "loadBalancingRules": [
+          {
+            "name": "LBRule",
+            "properties": {
+              "frontendIPConfiguration": {
+                "id": "[variables('frontEndIPConfigID')]"
+              },
+              "backendAddressPool": {
+                "id": "[variables('lbPoolID')]"
+              },
+              "protocol": "Tcp",
+              "frontendPort": 80,
+              "backendPort": 80,
+              "enableFloatingIP": false,
+              "idleTimeoutInMinutes": 5,
+              "probe": {
+                "id": "[variables('lbProbeID')]"
+              }
+            }
+          },
+          {
+            "name": "HTTPS",
+            "properties": {
+              "frontendIPConfiguration": {
+                "id": "[variables('frontEndIPConfigID')]"
+              },
+              "backendAddressPool": {
+                "id": "[variables('lbPoolID')]"
+              },
+              "protocol": "Tcp",
+              "frontendPort": 443,
+              "backendPort": 443,
+              "enableFloatingIP": false,
+              "idleTimeoutInMinutes": 5,
+              "probe": {
+                "id": "[variables('lbHTTPSProbeID')]"
+              }
+            }
+          }
+        ],
+        "probes": [
+          {
+            "name": "tcpProbe",
+            "properties": {
+              "protocol": "Tcp",
+              "port": 80,
+              "intervalInSeconds": 5,
+              "numberOfProbes": 2
+            }
+          },
+          {
+            "name": "HttpstcpProbe",
+            "properties": {
+              "protocol": "Tcp",
+              "port": 443,
+              "intervalInSeconds": 5,
+              "numberOfProbes": 2
+            }
+          }
+        ],
+          "inboundNatPools": [
+            {
+              "name": "[variables('natPoolNameSSH')]",
+              "properties": {
+                "frontendIPConfiguration": {
+                  "id": "[variables('frontEndIPConfigID')]"
+                },
+                "protocol": "tcp",
+                "frontendPortRangeStart": "[variables('natStartPortSSH')]",
+                "frontendPortRangeEnd": "[variables('natEndPortSSH')]",
+                "backendPort": "[variables('natBackendPortSSH')]"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "Microsoft.Compute/virtualMachineScaleSets",
+        "name": "[variables('namingInfix')]",
+        "location": "[parameters('resourceLocation')]",
+        "apiVersion": "[variables('apiVersion')]",
+        "dependsOn": [
+          "storageLoop",
+          "[concat('Microsoft.Network/loadBalancers/', variables('loadBalancerName'))]"
+        ],
+        "sku": {
+          "name": "[parameters('vmSku')]",
+          "tier": "Standard",
+          "capacity": "[parameters('instanceCount')]"
+        },
+        "properties": {
+          "upgradePolicy": {
+            "mode": "manual"
+          },
+          "virtualMachineProfile": {
+            "storageProfile": {
+              "osDisk": {
+                "vhdContainers": [
+                  "[concat('https://', variables('newStorageAccountName'), 0, '.blob.core.windows.net/', variables('vhdContainerName'))]",
+                  "[concat('https://', variables('newStorageAccountName'), 1, '.blob.core.windows.net/', variables('vhdContainerName'))]"
+                ],
+                "name": "[variables('osDiskName')]",
+                "caching": "ReadOnly",
+                "createOption": "FromImage"
+              },
+              "imageReference": "[variables('imageReference')]"
+            },
+            "osProfile": {
+              "computerNamePrefix": "[variables('namingInfix')]",
+              "adminUsername": "[parameters('adminUsername')]",
+              "adminPassword": "[parameters('adminPassword')]"
+            },
+            "networkProfile": {
+              "networkInterfaceConfigurations": [
+                {
+                  "name": "[variables('nicName')]",
+                  "properties": {
+                    "primary": "true",
+                    "ipConfigurations": [
+                      {
+                        "name": "[variables('ipConfigName')]",
+                        "properties": {
+                          "subnet": {
+                            "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', parameters('virtualNetworkResourceGroup'), '/providers/Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'), '/subnets/', parameters('subnetName'))]"
+                          },
+                          "loadBalancerBackendAddressPools": [
+                            {
+                              "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('loadBalancerName'), '/backendAddressPools/', variables('bePoolName'))]"
+                            }
+                          ],
+                          "loadBalancerInboundNatPools": [
+                            {
+                              "id": "[concat('/subscriptions/', subscription().subscriptionId,'/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Network/loadBalancers/', variables('loadBalancerName'), '/inboundNatPools/', variables('natPoolNameSSH'))]"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "extensionProfile": {
+              "extensions": [
+                {
+                    "type": "Microsoft.Compute/virtualMachines/extensions",
+                    "name": "DSCForLinux",
+                    "location": "[parameters('resourceLocation')]",
+                    "properties": {
+                        "publisher": "Microsoft.OSTCExtensions",
+                        "type": "DSCForLinux",
+                        "typeHandlerVersion": "2.0",
+                        "settings": {
+                            "Mode": "[parameters('mode')]",
+                            "FileUri": "[parameters('fileUri')]"
+                        },
+                        "protectedSettings": {
+                            "StorageAccountName": "[parameters('storageAccountName')]",
+                            "StorageAccountKey": "[parameters('storageAccountKey')]",
+                            "RegistrationUrl": "[parameters('registrationUrl')]",
+                            "RegistrationKey":  "[parameters('registrationKey')]"        
+                        }
+                    }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }

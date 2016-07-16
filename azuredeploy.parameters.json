@@ -1,0 +1,51 @@
+﻿{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "adminUsername": {
+            "value": "youradminuser"
+        },
+        "instanceCount": {
+            "value": 2
+        },
+        "resourceLocation": {
+            "value": "West Europe"
+        },
+        "subnetName": {
+            "value": "nameofsubnet"
+        },
+        "virtualNetworkName": {
+            "value": "nameofexistingvnet"
+        },
+        "virtualNetworkResourceGroup": {
+            "value": "nameofexistingresourcegroupwithvnet"
+        },
+        "vmssName": {
+            "value": "nameofvmss"
+        },
+        "adminPassword": {
+            "value": "P@$$w0rdForVm$$!"
+        },
+        "vmSku": {
+            "value": "Standard_F1"
+        },
+        "mode": {
+            "value": "Register"
+        },
+        "storageAccountName": {
+            "value": ""
+        },
+        "storageAccountKey": {
+            "value": ""
+        },
+        "fileUri": {
+            "value": ""
+        },
+        "registrationUrl": {
+            "value": ""
+        },
+        "registrationKey": {
+            "value": ""
+        }
+    }
+}
